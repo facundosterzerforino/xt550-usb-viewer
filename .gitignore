@@ -1,0 +1,37 @@
+# Private machine/device settings: never publish these.
+.env
+.env.*
+*.local.*
+config/
+configs/
+*config.local*
+*serial*.txt
+*handoff*
+# Frames/screenshots and other private captures
+screenshots/
+captures/
+frames/
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.webp
+*.raw
+*.rgb565
+*.log
+# Environments, caches, build artifacts
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
