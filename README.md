@@ -1,6 +1,6 @@
 # XT550 USB Viewer
 
-Small Python/Tkinter framebuffer viewer for the **Motorola XT550 running Android 2.3.6**. The original viewer was tested on that specific hardware: **320 × 480 RGB565**, touchscreen **`ms-msg20xx`**, **`/dev/input/event3`**, Linux **type-A multitouch**. This sanitized edition adds explicit device selection and fail-closed input controls, verified with offline tests. **Other phones, ROMs, resolutions, touch devices, or Android versions are not claimed to work.** The sanitized edition has not been retested against a phone.
+Small Python/Tkinter screen viewer for the **Motorola XT550 running Android 2.3.6**. The original viewer was tested on that specific hardware: **320 × 480 RGB565**, touchscreen **`ms-msg20xx`**, **`/dev/input/event3`**, Linux **type-A multitouch**. This sanitized edition adds explicit device selection and fail-closed input controls, verified with offline tests. **Other phones, ROMs, resolutions, touch devices, or Android versions are not claimed to work.** The screencap capture path was retested on the XT550 (10 captures, 0.24 s each, no leftover processes).
 
 No APK, device-side server, bundled ADB, runtime, firmware, or third-party binary is included. MIT licensed; see [LICENSE](LICENSE).
 
@@ -9,7 +9,7 @@ No APK, device-side server, bundled ADB, runtime, firmware, or third-party binar
 - **Read-only by default.** `--serial SERIAL` is mandatory. Input additionally requires **`--enable-control`** and an already working, user-authorized root setup (`su -c`). The viewer does not root or modify the OS.
 - Connects only as a **client** to an **already running** local ADB server at `127.0.0.1:5037`; it never starts/kills ADB, opens a listening socket, enumerates/selects another device, or falls back to one.
 - USB debugging, drivers/USB permissions, an appropriate ADB server, and any root authorization must already be configured by the owner. Use a USB-connected device, not an ADB-over-network target. An ADB serial is supplied at runtime, not stored in source/config.
-- Requires exact model and touchscreen identity before each capture and again immediately before each root action. The framebuffer version, geometry, format, and length are validated before reading pixel data. There is no generic shell input in the UI.
+- Requires exact model and touchscreen identity before each capture and again immediately before each root action. The screencap geometry, format, and length are validated before decoding pixel data. There is no generic shell input in the UI.
 - Capture/identity/disconnect/action failures immediately disable control and discard pending input in the worker, independently of Tk polling. Recovery needs a fresh validated frame. Gestures started in an older connection generation are rejected, even if released after recovery.
 - No screenshots/frame files, text logs, clipboard access, credentials, private machine paths, or persistent config. Frames exist only in memory. Typed text stays in the entry until accepted into the bounded in-memory queue; submitted text is not echoed in status/errors.
 - No license acceptance, credential retrieval, lock-screen bypass, or automatic unlocking. **Use only a device you own or have permission to operate.** Unlock normally on the device. Do not use this to enter secrets. Root input can press real buttons and affect apps/data.
@@ -22,9 +22,9 @@ These checks prevent accidental cross-device input; they are not a security boun
 - **Pillow 13.0.0**, exactly pinned in `requirements.txt` (Python >=3.11).
 - Python's **Tkinter**, supplied with Python/the OS, **Tk 8.6 or 9.0 API**. The local interpreter reports **Tk API 9.0 / Tcl 9.0.4**. Offline tests mock the GUI; they do not establish real-window compatibility on every Tk version.
 - A graphical desktop for the viewer. Unit tests need no display and never contact a phone. Tkinter must still be importable for the ImageTk boundary test.
-- An existing USB ADB transport exposing framebuffer protocol **version 1**. ADB is externally managed and not pinned or distributed here; no particular Platform Tools build is certified by this repository.
+- An existing USB ADB transport with `shell:` and `sync:` services and the stock `screencap` binary. ADB is externally managed and not pinned or distributed here; no particular Platform Tools build is certified by this repository.
 
-Framebuffer capture follows the targeted [AOSP Android 2.3.6 service](https://raw.githubusercontent.com/aosp-mirror/platform_system_core/android-2.3.6_r1/adb/framebuffer_service.c): it writes the header, immediately streams pixels, and closes without reading a frame-request byte. This viewer therefore does not send a request byte after the header. This is a Gingerbread-targeted decision, not a claim about every ADB framebuffer implementation. The original XT550 capture worked without that byte; this edition has not been retested on a phone.
+Capture no longer uses the ADB `framebuffer:` service. On the XT550, Android 2.3.6 adbd forks `screencap` for every `framebuffer:` request and never reaps it, leaving one zombie process per frame (about 3,300 after a few hours; the PID limit is 32,768). The viewer now runs `shell:screencap /data/local/tmp/xt550-viewer.raw` (adbd reaps shell children) and copies the 307,212-byte raw file over `sync:` (no extra process). Verified on the phone: zombie count stayed at 0 with the viewer open.
 
 ## Install (Windows)
 

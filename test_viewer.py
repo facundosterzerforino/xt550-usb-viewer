@@ -81,32 +81,49 @@ class FakeSocket:
 
 
 class TransportTests(unittest.TestCase):
-    def test_explicit_transport_bounded_capture_and_disconnect(self):
+    def test_capture_uses_reaped_screencap_and_sync_pull(self):
+        """framebuffer: on Android 2.3 adbd leaves one zombie screencap per frame."""
         import struct
         from unittest.mock import patch
         m = importlib.import_module('xt550_viewer')
-        self.assertTrue(hasattr(m.ADBClient, 'capture'), 'USB transport missing')
         client = m.ADBClient('TEST_DEVICE')
-        packet = b'OKAYOKAY' + struct.pack('<I12I', 1, *m.FRAME_HEADER)
-        sock = FakeSocket(packet + bytes(307200))
-        with patch('socket.create_connection', return_value=sock) as connect:
-            self.assertEqual(client.capture().size, (320, 480))
-        connect.assert_called_once_with(('127.0.0.1', 5037), timeout=12)
-        self.assertEqual(sock.sent, [b'001ahost:transport:TEST_DEVICE', b'000cframebuffer:'])
-        self.assertTrue(sock.closed)
-        for header in [(16, 4000000000) + m.FRAME_HEADER[2:],
-                       m.FRAME_HEADER[:2] + (0, 480) + m.FRAME_HEADER[4:]]:
-            sock = FakeSocket(b'OKAYOKAY' + struct.pack('<I12I', 1, *header) + b'NOT_READ')
-            with patch('socket.create_connection', return_value=sock), self.assertRaises(ValueError):
+        raw = struct.pack('<3I', 320, 480, 4) + struct.pack('<3H', 0xf800, 0x07e0, 0x001f) + bytes(307194)
+        def sync_reply(payload, chunk=65536):
+            out = b'OKAY'
+            for i in range(0, len(payload), chunk):
+                part = payload[i:i + chunk]
+                out += b'DATA' + struct.pack('<I', len(part)) + part
+            return out + b'DONE' + struct.pack('<I', 0)
+        shell = FakeSocket(b'OKAYOKAY')
+        sync = FakeSocket(b'OKAY' + sync_reply(raw))
+        with patch('socket.create_connection', side_effect=[shell, sync]) as connect:
+            image = client.capture()
+        self.assertEqual(image.size, (320, 480))
+        self.assertEqual([image.getpixel((x, 0)) for x in range(3)], [(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+        self.assertEqual(connect.call_count, 2)
+        path = m.CAPTURE_PATH.encode()
+        self.assertEqual(shell.sent, [b'001ahost:transport:TEST_DEVICE',
+                                      ('%04x' % len(b'shell:screencap ' + path)).encode() + b'shell:screencap ' + path])
+        self.assertEqual(sync.sent[:2], [b'001ahost:transport:TEST_DEVICE', b'0005sync:'])
+        self.assertEqual(sync.sent[2], b'RECV' + struct.pack('<I', len(path)) + path)
+        self.assertNotIn(b'000cframebuffer:', shell.sent + sync.sent)
+        self.assertTrue(shell.closed and sync.closed)
+        bad_raws = [struct.pack('<3I', 480, 320, 4) + bytes(307200), struct.pack('<3I', 320, 480, 1) + bytes(307200),
+                    raw[:-1], raw + b'x', b'']
+        for bad in bad_raws:
+            with self.subTest(size=len(bad)), self.assertRaises(ValueError):
+                with patch('socket.create_connection', side_effect=[FakeSocket(b'OKAYOKAY'), FakeSocket(b'OKAY' + sync_reply(bad))]):
+                    client.capture()
+        oversize = b'OKAYOKAY' + b'DATA' + struct.pack('<I', 400000)
+        failures = [(b'OKAYOKAYscreencap: error', b'OKAY' + sync_reply(raw)),
+                    (b'OKAYOKAY', b'OKAYOKAYFAIL' + struct.pack('<I', 4) + b'nope'),
+                    (b'OKAYOKAY', oversize), (b'OKAYOKAY', b'OKAYOKAYDATA'), (b'FAIL0004nope', b'')]
+        for shell_in, sync_in in failures:
+            socks = [FakeSocket(shell_in), FakeSocket(sync_in)]
+            with self.subTest(shell=shell_in[:12]), patch('socket.create_connection', side_effect=socks), \
+                    self.assertRaises((ValueError, ConnectionError)):
                 client.capture()
-            self.assertEqual(sock.incoming, b'NOT_READ')
-        for packet in [b'', b'OKAYOKAY' + struct.pack('<I', 2),
-                       b'FAIL0004nope', b'OKAYFAILffff',
-                       b'OKAYOKAY' + struct.pack('<I12I', 1, *m.FRAME_HEADER)]:
-            sock = FakeSocket(packet)
-            with patch('socket.create_connection', return_value=sock), self.assertRaises((ValueError, ConnectionError)):
-                client.capture()
-            self.assertTrue(sock.closed)
+            self.assertTrue(all(s.closed or not s.sent for s in socks))
 
     def test_shell_quotes_root_and_bounds_output(self):
         from unittest.mock import patch

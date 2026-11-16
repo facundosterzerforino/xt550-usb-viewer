@@ -1,4 +1,4 @@
-"""USB framebuffer viewer, specifically tested on Motorola XT550 Android 2.3.6."""
+"""USB screen viewer, specifically tested on Motorola XT550 Android 2.3.6."""
 import argparse
 import re
 import shlex
@@ -125,6 +125,18 @@ FRAME_HEADER = (16, 307200, 320, 480, 11, 5, 0, 5, 5, 6, 0, 0)
 def validate_header(header):
     if tuple(header) != FRAME_HEADER:
         raise ValueError('Only XT550 320x480 RGB565 framebuffer is supported')
+
+
+CAPTURE_PATH = '/data/local/tmp/xt550-viewer.raw'
+SCREENCAP_HEADER = (320, 480, 4)  # width, height, PIXEL_FORMAT_RGB_565
+CAPTURE_SIZE = 12 + FRAME_HEADER[1]
+
+
+def raw_to_image(raw):
+    """Decode Android 2.3 `screencap` raw output (12-byte header + RGB565)."""
+    if len(raw) != CAPTURE_SIZE or struct.unpack('<3I', raw[:12]) != SCREENCAP_HEADER:
+        raise ValueError('Only XT550 320x480 RGB565 screencap output is supported')
+    return frame_to_image(FRAME_HEADER, raw[12:])
 
 
 def frame_to_image(header, data):
@@ -337,13 +349,38 @@ class ADBClient:
         return sock
 
     def capture(self):
+        # Android 2.3 adbd never reaps the screencap it forks for framebuffer:,
+        # leaving one zombie per frame. A shell: child is reaped, and sync:
+        # copies the file without starting any process.
         with self.connect() as sock:
-            adb_service(sock, 'framebuffer:')
-            if struct.unpack('<I', receive_exact(sock, 4))[0] != 1:
-                raise ValueError('Unsupported framebuffer version')
-            header = struct.unpack('<12I', receive_exact(sock, 48))
-            validate_header(header)  # Before reading/allocating any pixel payload.
-            return frame_to_image(header, receive_exact(sock, header[1]))
+            adb_service(sock, 'shell:screencap ' + CAPTURE_PATH)
+            output = bytearray()
+            while True:
+                part = sock.recv(4096)
+                if not part:
+                    break
+                output.extend(part)
+                if len(output) > 4096:
+                    break
+        if output.strip():
+            raise ValueError('screencap failed on the device')
+        with self.connect() as sock:
+            adb_service(sock, 'sync:')
+            path = CAPTURE_PATH.encode('utf-8')
+            sock.sendall(b'RECV' + struct.pack('<I', len(path)) + path)
+            raw = bytearray()
+            while True:
+                kind = receive_exact(sock, 4)
+                size = struct.unpack('<I', receive_exact(sock, 4))[0]
+                if kind == b'DONE':
+                    break
+                if kind == b'FAIL':
+                    receive_exact(sock, min(size, 4096))
+                    raise ConnectionError('Could not read the capture file')
+                if kind != b'DATA' or size > 65536 or len(raw) + size > CAPTURE_SIZE:
+                    raise ValueError('Unexpected sync response')
+                raw.extend(receive_exact(sock, size))
+        return raw_to_image(bytes(raw))
 
     def shell(self, command, root=False):
         payload = 'su -c ' + shlex.quote(command) if root else command
