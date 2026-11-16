@@ -24,7 +24,7 @@ These checks prevent accidental cross-device input; they are not a security boun
 - A graphical desktop for the viewer. Unit tests need no display and never contact a phone. Tkinter must still be importable for the ImageTk boundary test.
 - An existing USB ADB transport with `shell:` and `sync:` services and the stock `screencap` binary. ADB is externally managed and not pinned or distributed here; no particular Platform Tools build is certified by this repository.
 
-Capture no longer uses the ADB `framebuffer:` service. On the XT550, Android 2.3.6 adbd forks `screencap` for every `framebuffer:` request and never reaps it, leaving one zombie process per frame (about 3,300 after a few hours; the PID limit is 32,768). The viewer now runs `shell:screencap /data/local/tmp/xt550-viewer.raw` (adbd reaps shell children) and copies the 307,212-byte raw file over `sync:` (no extra process). Verified on the phone: zombie count stayed at 0 with the viewer open.
+Capture no longer uses the ADB `framebuffer:` service. On the XT550, Android 2.3.6 adbd forks `screencap` for every `framebuffer:` request and never reaps it, leaving one zombie process per frame (about 3,300 after a few hours; the PID limit is 32,768). The viewer now runs `shell:screencap /data/local/tmp/xt550-viewer-<PC pid>.raw` (adbd reaps shell children; one file per PC process so a viewer and a script never read each other's half-written capture; removed at exit) and copies the 307,212-byte raw file over `sync:` (no extra process). Verified on the phone: zombie count stayed at 0 with the viewer open.
 
 ## Install (Windows)
 

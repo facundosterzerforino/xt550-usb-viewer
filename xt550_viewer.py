@@ -1,5 +1,7 @@
 """USB screen viewer, specifically tested on Motorola XT550 Android 2.3.6."""
 import argparse
+import atexit
+import os
 import re
 import shlex
 import socket
@@ -127,7 +129,8 @@ def validate_header(header):
         raise ValueError('Only XT550 320x480 RGB565 framebuffer is supported')
 
 
-CAPTURE_PATH = '/data/local/tmp/xt550-viewer.raw'
+# One file per PC process: two clients (viewer + script) must not overwrite each other's capture.
+CAPTURE_PATH = '/data/local/tmp/xt550-viewer-%d.raw' % os.getpid()
 SCREENCAP_HEADER = (320, 480, 4)  # width, height, PIXEL_FORMAT_RGB_565
 CAPTURE_SIZE = 12 + FRAME_HEADER[1]
 
@@ -348,10 +351,19 @@ class ADBClient:
             raise
         return sock
 
+    def _remove_capture(self):
+        try:
+            self.shell('rm ' + CAPTURE_PATH)
+        except Exception:
+            pass
+
     def capture(self):
         # Android 2.3 adbd never reaps the screencap it forks for framebuffer:,
         # leaving one zombie per frame. A shell: child is reaped, and sync:
         # copies the file without starting any process.
+        if not getattr(self, '_cleanup_registered', False):
+            atexit.register(self._remove_capture)
+            self._cleanup_registered = True
         with self.connect() as sock:
             adb_service(sock, 'shell:screencap ' + CAPTURE_PATH)
             output = bytearray()
